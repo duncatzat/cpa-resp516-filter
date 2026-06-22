@@ -257,6 +257,82 @@ Check detection statistics:
 curl -s http://localhost:8317/v0/resource/plugins/respfilter/status | jq .stats
 ```
 
+### Docker / Docker Compose install
+
+If you run CLIProxyAPI via Docker (the official `eceasy/cli-proxy-api:latest` image), the container's working directory is `/CLIProxyAPI` and `plugins.dir: "plugins"` resolves to `/CLIProxyAPI/plugins`. You mount your plugins directory as a volume — no image rebuild needed.
+
+**1. Create the plugins directory on your host:**
+
+```bash
+mkdir -p ./plugins
+
+# Download and extract the plugin (example: Linux amd64-v3)
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64-v3.tar.gz
+tar xzf respfilter_linux_amd64-v3.tar.gz -C ./plugins --strip-components=1
+# This places the .so at ./plugins/linux/amd64-v3/respfilter.so
+```
+
+> Docker containers run Linux, so always download a **Linux** archive (`linux_amd64-v3` or `linux_arm64`), even if your host runs macOS or Windows.
+
+**2. Add the plugins volume to your `docker-compose.yml`:**
+
+```yaml
+services:
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:latest
+    ports:
+      - "8317:8317"
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml
+      - ./auths:/root/.cli-proxy-api
+      - ./logs:/CLIProxyAPI/logs
+      - ./plugins:/CLIProxyAPI/plugins    # ← ADD THIS LINE
+    restart: unless-stopped
+```
+
+If you use environment variable overrides (the stock compose pattern):
+
+```yaml
+    volumes:
+      - ${CLI_PROXY_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml
+      - ${CLI_PROXY_AUTH_PATH:-./auths}:/root/.cli-proxy-api
+      - ${CLI_PROXY_LOG_PATH:-./logs}:/CLIProxyAPI/logs
+      - ${CLI_PROXY_PLUGINS_PATH:-./plugins}:/CLIProxyAPI/plugins   # ← ADD
+```
+
+**3. Enable the plugin in `config.yaml`:**
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"          # resolves to /CLIProxyAPI/plugins inside the container
+  configs:
+    respfilter:
+      enabled: true
+      priority: 1
+      # Add rules, defaults, etc. here (see Configuration section)
+```
+
+**4. Restart the container:**
+
+```bash
+docker compose up -d
+
+# Check logs for successful plugin load
+docker compose logs cli-proxy-api | grep pluginhost
+# Expected: pluginhost: plugin loaded  plugin_id=respfilter path=plugins/linux/amd64-v3/respfilter.so
+```
+
+**Verify via Management API:**
+
+```bash
+curl -s http://localhost:8317/v0/resource/plugins/respfilter/status | jq
+```
+
+> **Note:** The container runs as root, so file permissions on the `.so` are not an issue. Ensure the host file is at least world-readable (`chmod 644` is fine).
+
+> **Docker on Apple Silicon / ARM servers:** Download `respfilter_linux_arm64.tar.gz` instead of `amd64-v3`, since the container runs Linux on the host's architecture.
+
 ---
 
 ## Build from Source

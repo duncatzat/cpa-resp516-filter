@@ -354,6 +354,36 @@ jobs:
             curl http://localhost:8317/v0/resource/plugins/respfilter/status
             ```
 
+            ### Docker / Docker Compose
+
+            If you run CPA via Docker, mount the plugin as a volume — no image rebuild needed.
+
+            **1.** Download a **Linux** archive (even if your host is macOS/Windows, the container runs Linux):
+            ```bash
+            mkdir -p ./plugins
+            wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64-v3.tar.gz
+            tar xzf respfilter_linux_amd64-v3.tar.gz -C ./plugins --strip-components=1
+            ```
+
+            **2.** Add the plugins volume to your `docker-compose.yml`:
+            ```yaml
+            services:
+              cli-proxy-api:
+                image: eceasy/cli-proxy-api:latest
+                ports:
+                  - "8317:8317"
+                volumes:
+                  - ./config.yaml:/CLIProxyAPI/config.yaml
+                  - ./auths:/root/.cli-proxy-api
+                  - ./logs:/CLIProxyAPI/logs
+                  - ./plugins:/CLIProxyAPI/plugins    # ← ADD THIS
+                restart: unless-stopped
+            ```
+
+            **3.** Enable in `config.yaml` (same as above) → **4.** `docker compose up -d`
+
+            > Apple Silicon / ARM servers: download `respfilter_linux_arm64.tar.gz` instead.
+
             ### Platform Download Guide
 
             | File | Platform | How to choose |
@@ -428,6 +458,36 @@ jobs:
             # 通过 Management API 检查状态
             curl http://localhost:8317/v0/resource/plugins/respfilter/status
             ```
+
+            ### Docker / Docker Compose
+
+            如果你通过 Docker 运行 CPA，将插件挂载为 volume 即可——无需重新构建镜像。
+
+            **1.** 下载 **Linux** 版本（即使宿主机是 macOS/Windows，容器也运行 Linux）：
+            ```bash
+            mkdir -p ./plugins
+            wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64-v3.tar.gz
+            tar xzf respfilter_linux_amd64-v3.tar.gz -C ./plugins --strip-components=1
+            ```
+
+            **2.** 在 `docker-compose.yml` 中添加 plugins volume：
+            ```yaml
+            services:
+              cli-proxy-api:
+                image: eceasy/cli-proxy-api:latest
+                ports:
+                  - "8317:8317"
+                volumes:
+                  - ./config.yaml:/CLIProxyAPI/config.yaml
+                  - ./auths:/root/.cli-proxy-api
+                  - ./logs:/CLIProxyAPI/logs
+                  - ./plugins:/CLIProxyAPI/plugins    # ← 添加这一行
+                restart: unless-stopped
+            ```
+
+            **3.** 在 `config.yaml` 中启用（同上方配置）→ **4.** `docker compose up -d`
+
+            > Apple Silicon / ARM 服务器：下载 `respfilter_linux_arm64.tar.gz`。
 
             ### 平台下载指南
 

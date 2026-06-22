@@ -257,6 +257,82 @@ curl -s http://localhost:8317/v0/resource/plugins/respfilter/status | jq
 curl -s http://localhost:8317/v0/resource/plugins/respfilter/status | jq .stats
 ```
 
+### Docker / Docker Compose 安装
+
+如果你通过 Docker 运行 CLIProxyAPI（官方 `eceasy/cli-proxy-api:latest` 镜像），容器的工作目录是 `/CLIProxyAPI`，`plugins.dir: "plugins"` 解析为 `/CLIProxyAPI/plugins`。你只需将插件目录挂载为 volume——无需重新构建镜像。
+
+**1. 在宿主机上创建 plugins 目录：**
+
+```bash
+mkdir -p ./plugins
+
+# 下载并解压插件（示例：Linux amd64-v3）
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64-v3.tar.gz
+tar xzf respfilter_linux_amd64-v3.tar.gz -C ./plugins --strip-components=1
+# 这会将 .so 文件放到 ./plugins/linux/amd64-v3/respfilter.so
+```
+
+> Docker 容器运行 Linux，所以即使你的宿主机是 macOS 或 Windows，也始终下载 **Linux** 版本（`linux_amd64-v3` 或 `linux_arm64`）。
+
+**2. 在 `docker-compose.yml` 中添加 plugins volume：**
+
+```yaml
+services:
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:latest
+    ports:
+      - "8317:8317"
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml
+      - ./auths:/root/.cli-proxy-api
+      - ./logs:/CLIProxyAPI/logs
+      - ./plugins:/CLIProxyAPI/plugins    # ← 添加这一行
+    restart: unless-stopped
+```
+
+如果你使用环境变量覆盖（官方 compose 的惯例）：
+
+```yaml
+    volumes:
+      - ${CLI_PROXY_CONFIG_PATH:-./config.yaml}:/CLIProxyAPI/config.yaml
+      - ${CLI_PROXY_AUTH_PATH:-./auths}:/root/.cli-proxy-api
+      - ${CLI_PROXY_LOG_PATH:-./logs}:/CLIProxyAPI/logs
+      - ${CLI_PROXY_PLUGINS_PATH:-./plugins}:/CLIProxyAPI/plugins   # ← 添加
+```
+
+**3. 在 `config.yaml` 中启用插件：**
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"          # 容器内解析为 /CLIProxyAPI/plugins
+  configs:
+    respfilter:
+      enabled: true
+      priority: 1
+      # 在此添加 rules、defaults 等（参见配置章节）
+```
+
+**4. 重启容器：**
+
+```bash
+docker compose up -d
+
+# 检查日志确认插件加载成功
+docker compose logs cli-proxy-api | grep pluginhost
+# 预期：pluginhost: plugin loaded  plugin_id=respfilter path=plugins/linux/amd64-v3/respfilter.so
+```
+
+**通过 Management API 验证：**
+
+```bash
+curl -s http://localhost:8317/v0/resource/plugins/respfilter/status | jq
+```
+
+> **注意：** 容器以 root 运行，所以 `.so` 文件的权限不是问题。确保宿主机上的文件至少对所有用户可读（`chmod 644` 即可）。
+
+> **Apple Silicon / ARM 服务器上的 Docker：** 下载 `respfilter_linux_arm64.tar.gz` 而非 `amd64-v3`，因为容器以宿主机的架构运行 Linux。
+
 ---
 
 ## 从源码构建
