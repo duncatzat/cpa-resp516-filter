@@ -1,0 +1,118 @@
+# CLIProxyAPI RespFilter Plugin Configuration
+#
+# Add this block to your config.yaml under the existing "plugins" section.
+# Requires plugins.enabled: true and the respfilter shared library in plugins/.
+#
+# The plugin hot-reloads on config changes — no restart needed after the
+# initial install. Edit rules, save config.yaml, and CLIProxyAPI calls
+# plugin.reconfigure automatically.
+
+plugins:
+  enabled: true
+  configs:
+    respfilter:
+      enabled: true
+      priority: 1
+
+      # ─────────────────────────────────────────────────────────────────────
+      # Detection rules — evaluated in order, first match wins.
+      # Add new rules as degradation patterns evolve. Remove rules that
+      # are no longer relevant. Each rule can override any default field.
+      # ─────────────────────────────────────────────────────────────────────
+      rules:
+        # Rule 1: Classic 516 degradation on GPT-5.x models.
+        # When OpenAI degrades third-party requests, reasoning_tokens is
+        # always exactly 516 regardless of the requested reasoning effort.
+        - name: "openai-516"
+          paths:
+            - "usage.reasoning_tokens"
+            - "usage.completion_tokens_details.reasoning_tokens"
+            - "usage.output_tokens_details.reasoning_tokens"
+            - "reasoning_tokens"
+          # Additional paths for SSE stream chunks (Responses API nests
+          # usage under response.usage.*).
+          stream_paths:
+            - "response.usage.output_tokens_details.reasoning_tokens"
+            - "response.usage.reasoning_tokens"
+          operator: "exact"
+          values: [516]
+          # Only check GPT-5.x models (wildcard matching).
+          models: ["gpt-5*"]
+          # Replace the degraded response with an error so the client retries.
+          action: "error"
+          error_status: 503
+          # Go text/template — variables: {{.Rule}} {{.Model}} {{.Tokens}} {{.Path}}
+          error_body: '{"error":{"message":"Reasoning degradation detected (tokens={{.Tokens}}). Please retry.","type":"degradation_filter","code":"reasoning_516","param":null}}'
+          # SSE error chunk for streaming responses.
+          stream_error: |
+            data: {"error":{"message":"Reasoning degradation detected.","type":"degradation_filter","code":"reasoning_516"}}
+
+            data: [DONE]
+          log: true
+          log_level: "warn"
+          log_msg: 'respfilter[{{.Rule}}]: degradation model={{.Model}} tokens={{.Tokens}} path={{.Path}}'
+
+        # Rule 2: Watch for very low reasoning on any model — log only.
+        # Useful for monitoring without blocking responses.
+        # Uncomment to enable:
+        # - name: "low-reasoning-watch"
+        #   operator: "lte"
+        #   values: [10]
+        #   action: "log"
+        #   models: []
+        #   log: true
+
+        # Rule 3: Retry mode for a specific model.
+        # Re-executes the request via host.model.execute up to retry_max times.
+        # Uncomment to enable:
+        # - name: "gpt-5-codex-retry"
+        #   operator: "any_of"
+        #   values: [516, 512, 508]
+        #   models: ["gpt-5-codex"]
+        #   action: "retry"
+        #   retry_max: 2
+        #   retry_backoff_ms: 500
+
+      # ─────────────────────────────────────────────────────────────────────
+      # Defaults — applied to any rule field that is omitted.
+      # Change these once to affect all rules that don't override them.
+      # ─────────────────────────────────────────────────────────────────────
+      defaults:
+        paths:
+          - "usage.reasoning_tokens"
+          - "usage.completion_tokens_details.reasoning_tokens"
+          - "usage.output_tokens_details.reasoning_tokens"
+          - "reasoning_tokens"
+        stream_paths:
+          - "response.usage.output_tokens_details.reasoning_tokens"
+          - "response.usage.reasoning_tokens"
+        operator: "exact"
+        values: [516]
+        models: []
+        action: "error"
+        error_status: 503
+        error_body: '{"error":{"message":"Reasoning degradation detected (tokens={{.Tokens}}). Please retry.","type":"degradation_filter","code":"reasoning_516","param":null}}'
+        stream_error: |
+          data: {"error":{"message":"Reasoning degradation detected.","type":"degradation_filter","code":"reasoning_516"}}
+
+          data: [DONE]
+        retry_max: 1
+        retry_backoff_ms: 0
+        log: true
+        log_level: "warn"
+        log_msg: 'respfilter[{{.Rule}}]: degradation model={{.Model}} tokens={{.Tokens}} path={{.Path}}'
+
+      # ─────────────────────────────────────────────────────────────────────
+      # Stream optimization — only parse SSE chunks containing these keywords.
+      # This avoids JSON-parsing every chunk in long streaming responses.
+      # Set to empty list [] to parse all chunks.
+      # ─────────────────────────────────────────────────────────────────────
+      stream:
+        keywords: ["usage", "reasoning"]
+
+      # ─────────────────────────────────────────────────────────────────────
+      # Model matching mode for rule.model filters.
+      #   exact    — exact string match (case-insensitive)
+      #   wildcard — supports * as prefix/suffix/infix wildcard
+      # ─────────────────────────────────────────────────────────────────────
+      model_matching: "wildcard"
