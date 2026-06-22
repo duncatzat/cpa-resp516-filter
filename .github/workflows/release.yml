@@ -19,64 +19,57 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────
-  # Build matrix — 6 targets matching CLIProxyAPI's own release coverage
+  # Build matrix — 7 targets matching CLIProxyAPI's own release coverage
   # ─────────────────────────────────────────────────────────────────────
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.variant && '-' || '' }}${{ matrix.variant }}
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux amd64 — manylinux2014 for GLIBC 2.17 baseline (CentOS 7 compatible)
+          # Linux amd64 v3 (AVX2+ — CPA's preferred scan path)
           - goos: linux
             goarch: amd64
             goamd64: v3
             runner: ubuntu-latest
-            container: quay.io/pypa/manylinux2014_x86_64
             variant: v3
             artifact: respfilter.so
+          # Linux amd64 baseline
           - goos: linux
             goarch: amd64
             goamd64: v1
             runner: ubuntu-latest
-            container: quay.io/pypa/manylinux2014_x86_64
             variant: ""
             artifact: respfilter.so
-          # Linux arm64 — native ARM runner, no container (glibc from ubuntu-24.04)
+          # Linux arm64 — native ARM runner
           - goos: linux
             goarch: arm64
             runner: ubuntu-24.04-arm
-            container: ""
             variant: ""
             artifact: respfilter.so
           # macOS Apple Silicon
           - goos: darwin
             goarch: arm64
             runner: macos-15
-            container: ""
             variant: ""
             artifact: respfilter.so
           # macOS Intel
           - goos: darwin
             goarch: amd64
             runner: macos-15-intel
-            container: ""
             variant: ""
             artifact: respfilter.so
           # Windows amd64
           - goos: windows
             goarch: amd64
             runner: windows-latest
-            container: ""
             variant: ""
             artifact: respfilter.dll
           # Windows arm64
           - goos: windows
             goarch: arm64
             runner: windows-11-arm
-            container: ""
             variant: ""
             artifact: respfilter.dll
 
@@ -84,54 +77,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Go setup ──────────────────────────────────────────────────────
-      # manylinux2014 container has no pre-installed Go; install it.
-      # Native runners use actions/setup-go.
-      - name: Setup Go (container)
-        if: matrix.container != ''
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Setup Go (native)
-        if: matrix.container == ''
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
       # ── C compiler ────────────────────────────────────────────────────
-      # manylinux2014 has gcc pre-installed.
-      # Ubuntu arm64 runner has gcc via build-essential (pre-installed).
-      # macOS has clang via Xcode CLT (pre-installed).
-      # Windows needs mingw-w64.
-      - name: Install mingw-w64 (Windows)
+      # ubuntu-latest / ubuntu-24.04-arm: gcc pre-installed
+      # macOS: clang pre-installed via Xcode CLT
+      # windows-latest: MSYS2 mingw-w64 at C:\msys64\mingw64\bin
+      - name: Setup MSYS2 gcc path (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install -y mingw --version 14.2.0 --no-progress 2>$null
-          # Fallback: scoop or winget if choco fails
-          if ($LASTEXITCODE -ne 0) {
-            C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-gcc 2>$null
+          # windows-latest and windows-11-arm both ship MSYS2 with mingw-w64
+          $candidates = @(
+            "C:\msys64\mingw64\bin",
+            "C:\msys64\ucrt64\bin",
+            "C:\Program Files\mingw64\bin"
+          )
+          foreach ($p in $candidates) {
+            $gcc = Join-Path $p "gcc.exe"
+            if (Test-Path $gcc) {
+              Write-Host "Found gcc at: $gcc"
+              echo "$p" >> $env:GITHUB_PATH
+              & $gcc --version
+              return
+            }
           }
-          # Add to PATH
+          # Fallback: install via choco
+          Write-Host "gcc not found in standard paths, installing via choco..."
+          choco install -y mingw --no-progress
           $gccPath = (Get-ChildItem -Path "C:\Program Files\mingw64\bin","C:\msys64\mingw64\bin" -Filter "gcc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
           if ($gccPath) { echo "$gccPath" >> $env:GITHUB_PATH }
 
-      - name: Verify C compiler
+      - name: Verify C compiler and Go
         shell: bash
         run: |
+          echo "=== C compiler ==="
           which gcc && gcc --version || which cc && cc --version
+          echo "=== Go ==="
           go version
 
       # ── Build ─────────────────────────────────────────────────────────
       - name: Build plugin
         shell: bash
-        env:
-          CGO_ENABLED: "1"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOAMD64: ${{ matrix.goamd64 }}
         run: |
+          set -e
+
           # Set CC based on platform
           if [ "$RUNNER_OS" = "Windows" ]; then
             export CC="gcc"
@@ -142,13 +135,17 @@ jobs:
           fi
 
           # Determine output filename
-          if [ "$GOOS" = "windows" ]; then
+          if [ "${{ matrix.goos }}" = "windows" ]; then
             OUTPUT="respfilter.dll"
           else
             OUTPUT="respfilter.so"
           fi
 
-          echo "Building for $GOOS/$GOARCH (GOAMD64=${GOAMD64:-default})..."
+          echo "Building for ${{ matrix.goos }}/${{ matrix.goarch }} (GOAMD64=${{ matrix.goamd64 }})..."
+          CGO_ENABLED=1 \
+          GOOS=${{ matrix.goos }} \
+          GOARCH=${{ matrix.goarch }} \
+          GOAMD64=${{ matrix.goamd64 }} \
           go build -buildmode=c-shared -ldflags="-s -w" -o "$OUTPUT" .
 
           # Remove the generated C header (not needed at runtime)
@@ -156,42 +153,34 @@ jobs:
 
           # Verify the output
           ls -la "$OUTPUT"
-          echo "Build successful: $OUTPUT"
+          echo "✓ Build successful: $OUTPUT"
 
       # ── Stage into plugin directory structure ─────────────────────────
-      # CPA scans: plugins/linux/amd64-v3/ → plugins/linux/amd64/ → plugins/
-      # We package each release with the correct directory layout so users
-      # can just extract into their CPA installation.
       - name: Stage plugin files
         shell: bash
         run: |
+          set -e
+
           # Determine the plugin subdirectory for this target
-          case "${{ matrix.goos }}" in
-            linux)
-              if [ -n "${{ matrix.variant }}" ]; then
-                PLUG_DIR="plugins/linux/${{ matrix.goarch }}-${{ matrix.variant }}"
-              else
-                PLUG_DIR="plugins/linux/${{ matrix.goarch }}"
-              fi
-              ;;
-            darwin)
-              PLUG_DIR="plugins/darwin/${{ matrix.goarch }}"
-              ;;
-            windows)
-              PLUG_DIR="plugins/windows/${{ matrix.goarch }}"
-              ;;
-          esac
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            if [ -n "${{ matrix.variant }}" ]; then
+              PLUG_DIR="plugins/linux/${{ matrix.goarch }}-${{ matrix.variant }}"
+            else
+              PLUG_DIR="plugins/linux/${{ matrix.goarch }}"
+            fi
+          elif [ "${{ matrix.goos }}" = "darwin" ]; then
+            PLUG_DIR="plugins/darwin/${{ matrix.goarch }}"
+          else
+            PLUG_DIR="plugins/windows/${{ matrix.goarch }}"
+          fi
 
           mkdir -p "staging/$PLUG_DIR"
-          ARTIFACT="${{ matrix.artifact }}"
-          cp "$ARTIFACT" "staging/$PLUG_DIR/"
-
-          # Include config snippet for convenience
+          cp "${{ matrix.artifact }}" "staging/$PLUG_DIR/"
           cp config.snippet.yaml "staging/"
 
           # Set permissions (dlopen needs read+execute)
           if [ "${{ matrix.goos }}" != "windows" ]; then
-            chmod 755 "staging/$PLUG_DIR/$ARTIFACT"
+            chmod 755 "staging/$PLUG_DIR/${{ matrix.artifact }}"
           fi
 
           echo "Staged to: $PLUG_DIR"
@@ -199,31 +188,35 @@ jobs:
 
       # ── Archive ───────────────────────────────────────────────────────
       - name: Create archive
+        id: archive
         shell: bash
         run: |
+          set -e
+
           # Determine archive name
           if [ -n "${{ matrix.variant }}" ]; then
-            ARCHIVE="respfilter_${{ matrix.goos }}_${{ matrix.goarch }}-${{ matrix.variant }}"
+            ARCHIVE_NAME="respfilter_${{ matrix.goos }}_${{ matrix.goarch }}-${{ matrix.variant }}"
           else
-            ARCHIVE="respfilter_${{ matrix.goos }}_${{ matrix.goarch }}"
+            ARCHIVE_NAME="respfilter_${{ matrix.goos }}_${{ matrix.goarch }}"
           fi
 
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            7z a -tzip "${ARCHIVE}.zip" ./staging/*
-            echo "ARCHIVE_PATH=${ARCHIVE}.zip" >> $GITHUB_ENV
+            ARCHIVE_FILE="${ARCHIVE_NAME}.zip"
+            (cd staging && 7z a -tzip "../${ARCHIVE_FILE}" .)
           else
-            tar czf "${ARCHIVE}.tar.gz" -C staging .
-            echo "ARCHIVE_PATH=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+            ARCHIVE_FILE="${ARCHIVE_NAME}.tar.gz"
+            tar czf "${ARCHIVE_FILE}" -C staging .
           fi
 
-          echo "Archive: $ARCHIVE_PATH"
-          ls -la "$ARCHIVE_PATH"
+          echo "archive_file=${ARCHIVE_FILE}" >> $GITHUB_OUTPUT
+          ls -la "${ARCHIVE_FILE}"
+          echo "✓ Archive created: ${ARCHIVE_FILE}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: respfilter-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.variant && '-' || '' }}${{ matrix.variant }}
-          path: ${{ env.ARCHIVE_PATH }}
+          path: ${{ steps.archive.outputs.archive_file }}
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────────
@@ -270,7 +263,6 @@ jobs:
         shell: bash
         run: |
           cd artifacts
-          # Generate SHA256 checksums for all archives
           sha256sum *.tar.gz *.zip 2>/dev/null > checksums.txt || true
           echo "=== Checksums ==="
           cat checksums.txt
