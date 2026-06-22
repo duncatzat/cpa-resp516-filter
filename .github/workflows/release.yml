@@ -85,17 +85,14 @@ jobs:
       # ── C compiler ────────────────────────────────────────────────────
       # ubuntu-latest / ubuntu-24.04-arm: gcc pre-installed
       # macOS: clang pre-installed via Xcode CLT
-      # windows-latest: MSYS2 mingw-w64 at C:\msys64\mingw64\bin
-      - name: Setup MSYS2 gcc path (Windows)
-        if: runner.os == 'Windows'
+      # windows amd64: MSYS2 mingw-w64 gcc at C:\msys64\mingw64\bin
+      # windows arm64: MSYS2 gcc is x86_64 cross-compiler (can't assemble arm64),
+      #   so use LLVM clang instead (native arm64 support)
+      - name: Setup C compiler (Windows amd64)
+        if: runner.os == 'Windows' && matrix.goarch == 'amd64'
         shell: pwsh
         run: |
-          # windows-latest and windows-11-arm both ship MSYS2 with mingw-w64
-          $candidates = @(
-            "C:\msys64\mingw64\bin",
-            "C:\msys64\ucrt64\bin",
-            "C:\Program Files\mingw64\bin"
-          )
+          $candidates = @("C:\msys64\mingw64\bin", "C:\msys64\ucrt64\bin", "C:\Program Files\mingw64\bin")
           foreach ($p in $candidates) {
             $gcc = Join-Path $p "gcc.exe"
             if (Test-Path $gcc) {
@@ -105,11 +102,38 @@ jobs:
               return
             }
           }
-          # Fallback: install via choco
-          Write-Host "gcc not found in standard paths, installing via choco..."
+          Write-Host "gcc not found, installing via choco..."
           choco install -y mingw --no-progress
           $gccPath = (Get-ChildItem -Path "C:\Program Files\mingw64\bin","C:\msys64\mingw64\bin" -Filter "gcc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
           if ($gccPath) { echo "$gccPath" >> $env:GITHUB_PATH }
+
+      - name: Setup C compiler (Windows arm64)
+        if: runner.os == 'Windows' && matrix.goarch == 'arm64'
+        shell: pwsh
+        run: |
+          # On windows-11-arm, MSYS2's gcc targets x86_64 (emulated), not arm64.
+          # Use LLVM clang instead, which natively targets arm64 Windows.
+          $candidates = @(
+            "C:\msys64\clang64\bin",
+            "C:\Program Files\LLVM\bin",
+            "C:\Program Files (x86)\LLVM\bin"
+          )
+          foreach ($p in $candidates) {
+            $clang = Join-Path $p "clang.exe"
+            if (Test-Path $clang) {
+              Write-Host "Found clang at: $clang"
+              echo "$p" >> $env:GITHUB_PATH
+              & $clang --version
+              return
+            }
+          }
+          # Fallback: check if MSYS2 has clang64 package
+          Write-Host "clang not found in standard paths, trying MSYS2 pacman..."
+          C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-clang-aarch64-clang 2>$null
+          if (Test-Path "C:\msys64\clang64\bin\clang.exe") {
+            echo "C:\msys64\clang64\bin" >> $env:GITHUB_PATH
+            & "C:\msys64\clang64\bin\clang.exe" --version
+          }
 
       - name: Verify C compiler and Go
         shell: bash
@@ -127,7 +151,11 @@ jobs:
 
           # Set CC based on platform
           if [ "$RUNNER_OS" = "Windows" ]; then
-            export CC="gcc"
+            if [ "${{ matrix.goarch }}" = "arm64" ]; then
+              export CC="clang"
+            else
+              export CC="gcc"
+            fi
           elif [ "$RUNNER_OS" = "macOS" ]; then
             export CC="clang"
           else
