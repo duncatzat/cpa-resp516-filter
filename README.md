@@ -4,7 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go 1.21+](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://go.dev/)
-[![Platform: Linux · macOS · Windows](https://img.shields.io/badge/Platform-Linux·macOS·Windows-blue.svg)](#build)
+[![Platform: Linux · macOS · Windows](https://img.shields.io/badge/Platform-Linux·macOS·Windows-blue.svg)](#build-from-source)
+[![中文文档](https://img.shields.io/badge/文档-中文-red.svg)](README_CN.md)
 
 ---
 
