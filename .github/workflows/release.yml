@@ -1,0 +1,334 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        default: "v0.0.0"
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Build matrix — 6 targets matching CLIProxyAPI's own release coverage
+  # ─────────────────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.variant && '-' || '' }}${{ matrix.variant }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux amd64 — manylinux2014 for GLIBC 2.17 baseline (CentOS 7 compatible)
+          - goos: linux
+            goarch: amd64
+            goamd64: v3
+            runner: ubuntu-latest
+            container: quay.io/pypa/manylinux2014_x86_64
+            variant: v3
+            artifact: respfilter.so
+          - goos: linux
+            goarch: amd64
+            goamd64: v1
+            runner: ubuntu-latest
+            container: quay.io/pypa/manylinux2014_x86_64
+            variant: ""
+            artifact: respfilter.so
+          # Linux arm64 — native ARM runner, no container (glibc from ubuntu-24.04)
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+            container: ""
+            variant: ""
+            artifact: respfilter.so
+          # macOS Apple Silicon
+          - goos: darwin
+            goarch: arm64
+            runner: macos-15
+            container: ""
+            variant: ""
+            artifact: respfilter.so
+          # macOS Intel
+          - goos: darwin
+            goarch: amd64
+            runner: macos-15-intel
+            container: ""
+            variant: ""
+            artifact: respfilter.so
+          # Windows amd64
+          - goos: windows
+            goarch: amd64
+            runner: windows-latest
+            container: ""
+            variant: ""
+            artifact: respfilter.dll
+          # Windows arm64
+          - goos: windows
+            goarch: arm64
+            runner: windows-11-arm
+            container: ""
+            variant: ""
+            artifact: respfilter.dll
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Go setup ──────────────────────────────────────────────────────
+      # manylinux2014 container has no pre-installed Go; install it.
+      # Native runners use actions/setup-go.
+      - name: Setup Go (container)
+        if: matrix.container != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Go (native)
+        if: matrix.container == ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # ── C compiler ────────────────────────────────────────────────────
+      # manylinux2014 has gcc pre-installed.
+      # Ubuntu arm64 runner has gcc via build-essential (pre-installed).
+      # macOS has clang via Xcode CLT (pre-installed).
+      # Windows needs mingw-w64.
+      - name: Install mingw-w64 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y mingw --version 14.2.0 --no-progress 2>$null
+          # Fallback: scoop or winget if choco fails
+          if ($LASTEXITCODE -ne 0) {
+            C:\msys64\usr\bin\pacman.exe -S --noconfirm mingw-w64-x86_64-gcc 2>$null
+          }
+          # Add to PATH
+          $gccPath = (Get-ChildItem -Path "C:\Program Files\mingw64\bin","C:\msys64\mingw64\bin" -Filter "gcc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
+          if ($gccPath) { echo "$gccPath" >> $env:GITHUB_PATH }
+
+      - name: Verify C compiler
+        shell: bash
+        run: |
+          which gcc && gcc --version || which cc && cc --version
+          go version
+
+      # ── Build ─────────────────────────────────────────────────────────
+      - name: Build plugin
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOAMD64: ${{ matrix.goamd64 }}
+        run: |
+          # Set CC based on platform
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export CC="gcc"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            export CC="clang"
+          else
+            export CC="gcc"
+          fi
+
+          # Determine output filename
+          if [ "$GOOS" = "windows" ]; then
+            OUTPUT="respfilter.dll"
+          else
+            OUTPUT="respfilter.so"
+          fi
+
+          echo "Building for $GOOS/$GOARCH (GOAMD64=${GOAMD64:-default})..."
+          go build -buildmode=c-shared -ldflags="-s -w" -o "$OUTPUT" .
+
+          # Remove the generated C header (not needed at runtime)
+          rm -f respfilter.h
+
+          # Verify the output
+          ls -la "$OUTPUT"
+          echo "Build successful: $OUTPUT"
+
+      # ── Stage into plugin directory structure ─────────────────────────
+      # CPA scans: plugins/linux/amd64-v3/ → plugins/linux/amd64/ → plugins/
+      # We package each release with the correct directory layout so users
+      # can just extract into their CPA installation.
+      - name: Stage plugin files
+        shell: bash
+        run: |
+          # Determine the plugin subdirectory for this target
+          case "${{ matrix.goos }}" in
+            linux)
+              if [ -n "${{ matrix.variant }}" ]; then
+                PLUG_DIR="plugins/linux/${{ matrix.goarch }}-${{ matrix.variant }}"
+              else
+                PLUG_DIR="plugins/linux/${{ matrix.goarch }}"
+              fi
+              ;;
+            darwin)
+              PLUG_DIR="plugins/darwin/${{ matrix.goarch }}"
+              ;;
+            windows)
+              PLUG_DIR="plugins/windows/${{ matrix.goarch }}"
+              ;;
+          esac
+
+          mkdir -p "staging/$PLUG_DIR"
+          ARTIFACT="${{ matrix.artifact }}"
+          cp "$ARTIFACT" "staging/$PLUG_DIR/"
+
+          # Include config snippet for convenience
+          cp config.snippet.yaml "staging/"
+
+          # Set permissions (dlopen needs read+execute)
+          if [ "${{ matrix.goos }}" != "windows" ]; then
+            chmod 755 "staging/$PLUG_DIR/$ARTIFACT"
+          fi
+
+          echo "Staged to: $PLUG_DIR"
+          find staging -type f | sort
+
+      # ── Archive ───────────────────────────────────────────────────────
+      - name: Create archive
+        shell: bash
+        run: |
+          # Determine archive name
+          if [ -n "${{ matrix.variant }}" ]; then
+            ARCHIVE="respfilter_${{ matrix.goos }}_${{ matrix.goarch }}-${{ matrix.variant }}"
+          else
+            ARCHIVE="respfilter_${{ matrix.goos }}_${{ matrix.goarch }}"
+          fi
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a -tzip "${ARCHIVE}.zip" ./staging/*
+            echo "ARCHIVE_PATH=${ARCHIVE}.zip" >> $GITHUB_ENV
+          else
+            tar czf "${ARCHIVE}.tar.gz" -C staging .
+            echo "ARCHIVE_PATH=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+          fi
+
+          echo "Archive: $ARCHIVE_PATH"
+          ls -la "$ARCHIVE_PATH"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: respfilter-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.variant && '-' || '' }}${{ matrix.variant }}
+          path: ${{ env.ARCHIVE_PATH }}
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Release — collect all artifacts and publish to GitHub Releases
+  # ─────────────────────────────────────────────────────────────────────
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        shell: bash
+        run: |
+          echo "=== All release artifacts ==="
+          find artifacts -type f | sort
+          echo ""
+          echo "=== File sizes ==="
+          ls -lh artifacts/*
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd artifacts
+          # Generate SHA256 checksums for all archives
+          sha256sum *.tar.gz *.zip 2>/dev/null > checksums.txt || true
+          echo "=== Checksums ==="
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body: |
+            # CPA RespFilter ${{ steps.tag.outputs.tag }}
+
+            A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) plugin that detects and filters OpenAI reasoning degradation (the **516 problem**).
+
+            ## Install
+
+            1. Download the archive matching your platform
+            2. Extract into your CLIProxyAPI installation directory (merge with existing `plugins/` folder)
+            3. Add the plugin config to `config.yaml` (see `config.snippet.yaml` in the archive)
+            4. Restart CLIProxyAPI
+
+            ## Platforms
+
+            | File | Platform | Plugin path |
+            |------|----------|-------------|
+            | `respfilter_linux_amd64-v3.tar.gz` | Linux x86_64 (AVX2+) | `plugins/linux/amd64-v3/respfilter.so` |
+            | `respfilter_linux_amd64.tar.gz` | Linux x86_64 (baseline) | `plugins/linux/amd64/respfilter.so` |
+            | `respfilter_linux_arm64.tar.gz` | Linux ARM64 | `plugins/linux/arm64/respfilter.so` |
+            | `respfilter_darwin_arm64.tar.gz` | macOS Apple Silicon | `plugins/darwin/arm64/respfilter.so` |
+            | `respfilter_darwin_amd64.tar.gz` | macOS Intel | `plugins/darwin/amd64/respfilter.so` |
+            | `respfilter_windows_amd64.zip` | Windows x86_64 | `plugins/windows/amd64/respfilter.dll` |
+            | `respfilter_windows_arm64.zip` | Windows ARM64 | `plugins/windows/arm64/respfilter.dll` |
+
+            ## Which Linux amd64 to download?
+
+            - **`amd64-v3`** — for CPUs with AVX2/BMI/FMA (most servers since ~2015). This is CPA's preferred scan path.
+            - **`amd64`** — baseline x86_64, for older CPUs or VMs without AVX2.
+
+            If unsure, download `amd64-v3`. CPA automatically falls back to `amd64` if the v3 binary can't load.
+
+            ## Verify
+
+            ```bash
+            # Check checksums
+            sha256sum -c checksums.txt
+
+            # Verify exported symbols (Linux/macOS)
+            nm -D respfilter.so | grep cliproxy
+            # Expected: cliproxyPluginCall, cliproxyPluginFree, cliproxyPluginShutdown, cliproxy_plugin_init
+            ```
+
+            ## Full documentation
+
+            See [README.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README.md) (English) or [README_CN.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README_CN.md) (中文).
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/checksums.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: false

@@ -6,6 +6,7 @@
 [![Go 1.21+](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://go.dev/)
 [![Platform: Linux · macOS · Windows](https://img.shields.io/badge/Platform-Linux·macOS·Windows-blue.svg)](#从源码构建)
 [![English](https://img.shields.io/badge/docs-English-blue.svg)](README.md)
+[![Release](https://img.shields.io/github/v/release/duncatzat/cpa-resp516-filter?display_name=tag&sort=semver)](https://github.com/duncatzat/cpa-resp516-filter/releases)
 
 ---
 
@@ -111,6 +112,37 @@
 ---
 
 ## 快速开始（Ubuntu）
+
+### 方式 A — 下载预编译二进制（推荐）
+
+跳过构建步骤。从 [GitHub Releases](https://github.com/duncatzat/cpa-resp516-filter/releases) 下载预编译插件：
+
+```bash
+# 查看你的架构
+uname -m
+# x86_64 → amd64    aarch64 → arm64
+
+# 下载对应平台的最新 release
+# Linux x86_64（大多数服务器，AVX2+）：
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64-v3.tar.gz
+
+# Linux x86_64（无 AVX2 的旧 CPU）：
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64.tar.gz
+
+# Linux ARM64（树莓派、Graviton、ARM 服务器）：
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_arm64.tar.gz
+
+# 解压到 CLIProxyAPI 安装目录
+tar xzf respfilter_linux_amd64-v3.tar.gz -C /opt/cliproxyapi/
+
+# 压缩包已包含正确的插件目录结构：
+#   plugins/linux/amd64-v3/respfilter.so
+#   config.snippet.yaml
+```
+
+然后进入 [第 3 步 — 配置](#第-3-步--配置)。
+
+### 方式 B — 从源码构建
 
 ### 前置条件
 

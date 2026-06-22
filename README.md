@@ -6,6 +6,7 @@
 [![Go 1.21+](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://go.dev/)
 [![Platform: Linux · macOS · Windows](https://img.shields.io/badge/Platform-Linux·macOS·Windows-blue.svg)](#build-from-source)
 [![中文文档](https://img.shields.io/badge/文档-中文-red.svg)](README_CN.md)
+[![Release](https://img.shields.io/github/v/release/duncatzat/cpa-resp516-filter?display_name=tag&sort=semver)](https://github.com/duncatzat/cpa-resp516-filter/releases)
 
 ---
 
@@ -111,6 +112,37 @@ This plugin turns that fixed signature into a detection signal: if `reasoning_to
 ---
 
 ## Quick Start (Ubuntu)
+
+### Option A — Download pre-built binary (recommended)
+
+Skip the build step entirely. Download the pre-compiled plugin from [GitHub Releases](https://github.com/duncatzat/cpa-resp516-filter/releases):
+
+```bash
+# Check your architecture
+uname -m
+# x86_64 → amd64    aarch64 → arm64
+
+# Download the latest release for your platform
+# Linux x86_64 (most servers, AVX2+):
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64-v3.tar.gz
+
+# Linux x86_64 (older CPUs without AVX2):
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_amd64.tar.gz
+
+# Linux ARM64 (Raspberry Pi, Graviton, ARM servers):
+wget https://github.com/duncatzat/cpa-resp516-filter/releases/latest/download/respfilter_linux_arm64.tar.gz
+
+# Extract into your CLIProxyAPI installation
+tar xzf respfilter_linux_amd64-v3.tar.gz -C /opt/cliproxyapi/
+
+# The archive already contains the correct plugin directory structure:
+#   plugins/linux/amd64-v3/respfilter.so
+#   config.snippet.yaml
+```
+
+Then proceed to [Step 3 — Configure](#step-3--configure).
+
+### Option B — Build from source
 
 ### Prerequisites
 
