@@ -303,48 +303,166 @@ jobs:
           body: |
             # CPA RespFilter ${{ steps.tag.outputs.tag }}
 
-            A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) plugin that detects and filters OpenAI reasoning degradation (the **516 problem**).
+            [English](#english) | [中文](#中文)
 
-            ## Install
+            ---
 
-            1. Download the archive matching your platform
-            2. Extract into your CLIProxyAPI installation directory (merge with existing `plugins/` folder)
-            3. Add the plugin config to `config.yaml` (see `config.snippet.yaml` in the archive)
-            4. Restart CLIProxyAPI
+            ## English
 
-            ## Platforms
+            A [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) plugin that detects and filters OpenAI reasoning degradation — the **"516 problem"**. When degradation occurs, the response always reports a fixed `reasoning_tokens` value (516) regardless of the requested reasoning effort. This plugin detects that signature and takes configurable action.
 
-            | File | Platform | Plugin path |
-            |------|----------|-------------|
-            | `respfilter_linux_amd64-v3.tar.gz` | Linux x86_64 (AVX2+) | `plugins/linux/amd64-v3/respfilter.so` |
-            | `respfilter_linux_amd64.tar.gz` | Linux x86_64 (baseline) | `plugins/linux/amd64/respfilter.so` |
-            | `respfilter_linux_arm64.tar.gz` | Linux ARM64 | `plugins/linux/arm64/respfilter.so` |
-            | `respfilter_darwin_arm64.tar.gz` | macOS Apple Silicon | `plugins/darwin/arm64/respfilter.so` |
-            | `respfilter_darwin_amd64.tar.gz` | macOS Intel | `plugins/darwin/amd64/respfilter.so` |
-            | `respfilter_windows_amd64.zip` | Windows x86_64 | `plugins/windows/amd64/respfilter.dll` |
-            | `respfilter_windows_arm64.zip` | Windows ARM64 | `plugins/windows/arm64/respfilter.dll` |
+            ### Quick Install
 
-            ## Which Linux amd64 to download?
+            **1. Download** the archive matching your platform (see table below)
 
-            - **`amd64-v3`** — for CPUs with AVX2/BMI/FMA (most servers since ~2015). This is CPA's preferred scan path.
-            - **`amd64`** — baseline x86_64, for older CPUs or VMs without AVX2.
-
-            If unsure, download `amd64-v3`. CPA automatically falls back to `amd64` if the v3 binary can't load.
-
-            ## Verify
+            **2. Extract** into your CLIProxyAPI installation directory:
 
             ```bash
-            # Check checksums
-            sha256sum -c checksums.txt
+            # Linux / macOS
+            tar xzf respfilter_linux_amd64-v3.tar.gz -C /opt/cliproxyapi/
 
-            # Verify exported symbols (Linux/macOS)
-            nm -D respfilter.so | grep cliproxy
+            # Windows — unzip and copy the plugins/ folder into your CPA directory
+            ```
+
+            The archive already contains the correct directory structure:
+            ```
+            plugins/linux/amd64-v3/respfilter.so   # the plugin
+            config.snippet.yaml                    # config example
+            ```
+
+            **3. Configure** — add this to your `config.yaml`:
+
+            ```yaml
+            plugins:
+              enabled: true
+              configs:
+                respfilter:
+                  enabled: true
+                  priority: 1
+            ```
+
+            That's it — the default config detects `reasoning_tokens == 516` and returns an error so your client retries. For advanced rules (custom paths, retry mode, model filtering), see `config.snippet.yaml` in the archive or the [full documentation](https://github.com/duncatzat/cpa-resp516-filter#configuration).
+
+            **4. Restart** CLIProxyAPI and verify:
+
+            ```bash
+            # Check logs
+            journalctl -u cliproxyapi | grep pluginhost
+            # Expected: pluginhost: plugin loaded  plugin_id=respfilter ...
+
+            # Check status via Management API
+            curl http://localhost:8317/v0/resource/plugins/respfilter/status
+            ```
+
+            ### Platform Download Guide
+
+            | File | Platform | How to choose |
+            |------|----------|---------------|
+            | `respfilter_linux_amd64-v3.tar.gz` | Linux x86_64 (AVX2+) | Most servers since ~2015. **Recommended.** |
+            | `respfilter_linux_amd64.tar.gz` | Linux x86_64 (baseline) | Older CPUs or VMs without AVX2 |
+            | `respfilter_linux_arm64.tar.gz` | Linux ARM64 | Raspberry Pi 4/5, AWS Graviton, ARM servers |
+            | `respfilter_darwin_arm64.tar.gz` | macOS Apple Silicon | M1/M2/M3/M4 Macs |
+            | `respfilter_darwin_amd64.tar.gz` | macOS Intel | Pre-2020 Intel Macs |
+            | `respfilter_windows_amd64.zip` | Windows x86_64 | Most Windows PCs/servers |
+            | `respfilter_windows_arm64.zip` | Windows ARM64 | Snapdragon X, Surface Pro X |
+
+            > **Not sure which Linux?** Download `amd64-v3`. CPA automatically falls back to `amd64` if your CPU doesn't support AVX2.
+
+            ### Verify Download
+
+            ```bash
+            sha256sum -c checksums.txt                    # verify checksum
+            nm -D respfilter.so \| grep cliproxy          # verify symbols (Linux/macOS)
             # Expected: cliproxyPluginCall, cliproxyPluginFree, cliproxyPluginShutdown, cliproxy_plugin_init
             ```
 
-            ## Full documentation
+            ### Documentation
 
-            See [README.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README.md) (English) or [README_CN.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README_CN.md) (中文).
+            Full documentation: [README.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README.md) (English) · [README_CN.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README_CN.md) (中文)
+
+            ---
+
+            ## 中文
+
+            一个 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 插件，检测并过滤 OpenAI 推理降智问题——**"516 问题"**。当降智发生时，响应始终报告固定的 `reasoning_tokens` 值（516），与请求的推理强度无关。本插件检测该特征并执行可配置的操作。
+
+            ### 快速安装
+
+            **1. 下载** 对应平台的压缩包（见下方表格）
+
+            **2. 解压** 到 CLIProxyAPI 安装目录：
+
+            ```bash
+            # Linux / macOS
+            tar xzf respfilter_linux_amd64-v3.tar.gz -C /opt/cliproxyapi/
+
+            # Windows — 解压后将 plugins/ 文件夹复制到 CPA 目录
+            ```
+
+            压缩包已包含正确的目录结构：
+            ```
+            plugins/linux/amd64-v3/respfilter.so   # 插件文件
+            config.snippet.yaml                    # 配置示例
+            ```
+
+            **3. 配置** — 在 `config.yaml` 中添加：
+
+            ```yaml
+            plugins:
+              enabled: true
+              configs:
+                respfilter:
+                  enabled: true
+                  priority: 1
+            ```
+
+            这样就可以了——默认配置检测 `reasoning_tokens == 516` 并返回错误让客户端重试。如需高级规则（自定义路径、重试模式、模型过滤），参见压缩包中的 `config.snippet.yaml` 或[完整文档](https://github.com/duncatzat/cpa-resp516-filter#配置)。
+
+            **4. 重启** CLIProxyAPI 并验证：
+
+            ```bash
+            # 检查日志
+            journalctl -u cliproxyapi | grep pluginhost
+            # 预期：pluginhost: plugin loaded  plugin_id=respfilter ...
+
+            # 通过 Management API 检查状态
+            curl http://localhost:8317/v0/resource/plugins/respfilter/status
+            ```
+
+            ### 平台下载指南
+
+            | 文件 | 平台 | 如何选择 |
+            |------|------|----------|
+            | `respfilter_linux_amd64-v3.tar.gz` | Linux x86_64 (AVX2+) | 2015 年后的大多数服务器。**推荐。** |
+            | `respfilter_linux_amd64.tar.gz` | Linux x86_64 (基础版) | 旧 CPU 或不支持 AVX2 的虚拟机 |
+            | `respfilter_linux_arm64.tar.gz` | Linux ARM64 | 树莓派 4/5、AWS Graviton、ARM 服务器 |
+            | `respfilter_darwin_arm64.tar.gz` | macOS Apple Silicon | M1/M2/M3/M4 Mac |
+            | `respfilter_darwin_amd64.tar.gz` | macOS Intel | 2020 年前的 Intel Mac |
+            | `respfilter_windows_amd64.zip` | Windows x86_64 | 大多数 Windows 电脑/服务器 |
+            | `respfilter_windows_arm64.zip` | Windows ARM64 | Snapdragon X、Surface Pro X |
+
+            > **不知道选哪个 Linux？** 下载 `amd64-v3`。如果你的 CPU 不支持 AVX2，CPA 会自动回退到 `amd64` 版本。
+
+            ### 验证下载
+
+            ```bash
+            sha256sum -c checksums.txt                    # 校验完整性
+            nm -D respfilter.so \| grep cliproxy          # 验证符号 (Linux/macOS)
+            # 预期：cliproxyPluginCall, cliproxyPluginFree, cliproxyPluginShutdown, cliproxy_plugin_init
+            ```
+
+            ### 什么是 516 问题？
+
+            当 OpenAI 对第三方客户端（CLIProxyAPI、OpenCode 等）的请求进行降智时：
+            - `reasoning_tokens` 始终固定为 **516**，无论你请求的推理强度是 low/medium/high/xhigh
+            - 模型回答质量明显下降，但 Token 费用仍按正常收取
+            - 这是一个可检测的特征——本插件就是利用这个固定值来识别降智
+
+            详见[社区讨论](https://github.com/router-for-me/CLIProxyAPI/discussions/3937)。
+
+            ### 文档
+
+            完整文档：[README.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README.md) (English) · [README_CN.md](https://github.com/duncatzat/cpa-resp516-filter/blob/main/README_CN.md) (中文)
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip
